@@ -777,7 +777,7 @@ func (d *decodeState) object(v reflect.Value) {
 				for _, i := range f.index {
 					// subv要指向 v的子元素
 					subv = subv.Field(i)
-					log.Printf("subv is %v, change to Elem: %s, i: %d", subv.Kind(), f.name, i)
+					// log.Printf("subv is %v, change to Elem: %s, i: %d", subv.Kind(), f.name, i)
 					if subv.Kind() == reflect.Ptr {
 						if subv.IsNil() {
 							subv.Set(reflect.New(subv.Type().Elem()))
@@ -1108,7 +1108,7 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 }
 
 func (d *decodeState) parseIntValue(c byte, item []byte, v *reflect.Value, fromQuoted bool) {
-	log.Printf("parseIntValue, item: %s", string(item))
+	// log.Printf("parseIntValue, item: %s", string(item))
 	if c != '-' && (c < '0' || c > '9') {
 		if fromQuoted {
 			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type()))
@@ -1119,7 +1119,7 @@ func (d *decodeState) parseIntValue(c byte, item []byte, v *reflect.Value, fromQ
 	s := string(item)
 	switch v.Kind() {
 	default:
-		log.Printf("parseIntValue, default item: %s", string(item))
+		// log.Printf("parseIntValue, default item: %s", string(item))
 		if fromQuoted {
 			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type()))
 		} else {
@@ -1161,7 +1161,7 @@ func (d *decodeState) parseIntValue(c byte, item []byte, v *reflect.Value, fromQ
 		}
 		v.SetFloat(n)
 	}
-	log.Printf("parseIntValue, succeed %s", string(item))
+	// log.Printf("parseIntValue, succeed %s", string(item))
 }
 
 // The xxxInterface routines build up a value to be stored
