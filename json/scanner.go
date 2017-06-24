@@ -19,6 +19,7 @@ import "strconv"
 // scan is passed in for use by checkValid to avoid an allocation.
 func checkValid(data []byte, scan *scanner) error {
 	scan.reset()
+	// 简单的语法检查
 	for _, c := range data {
 		scan.bytes++
 		if scan.step(scan, c) == scanError {
@@ -143,6 +144,7 @@ const (
 // reset prepares the scanner for use.
 // It must be called before calling s.step.
 func (s *scanner) reset() {
+	// 开始状态
 	s.step = stateBeginValue
 	s.parseState = s.parseState[0:0]
 	s.err = nil
@@ -205,10 +207,12 @@ func stateBeginValueOrEmpty(s *scanner, c byte) int {
 
 // stateBeginValue is the state at the beginning of the input.
 func stateBeginValue(s *scanner, c byte) int {
+	// 跳过空格
 	if c <= ' ' && isSpace(c) {
 		return scanSkipSpace
 	}
 	switch c {
+	// 对象: 关注string/}
 	case '{':
 		s.step = stateBeginStringOrEmpty
 		s.pushParseState(parseObjectKey)
@@ -245,9 +249,11 @@ func stateBeginValue(s *scanner, c byte) int {
 
 // stateBeginStringOrEmpty is the state after reading `{`.
 func stateBeginStringOrEmpty(s *scanner, c byte) int {
+	// 跳过space
 	if c <= ' ' && isSpace(c) {
 		return scanSkipSpace
 	}
+	// 发现 }
 	if c == '}' {
 		n := len(s.parseState)
 		s.parseState[n-1] = parseObjectValue
@@ -261,6 +267,9 @@ func stateBeginString(s *scanner, c byte) int {
 	if c <= ' ' && isSpace(c) {
 		return scanSkipSpace
 	}
+
+	// JSON的所有的Key都按照字符串处理, 例如: js中的key
+	// 但是最终可以按照Type的类型做二次转换
 	if c == '"' {
 		s.step = stateInString
 		return scanBeginLiteral

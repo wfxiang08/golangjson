@@ -12,18 +12,19 @@ import (
 // tag, or the empty string. It does not include the leading comma.
 type tagOptions string
 
-// parseTag splits a struct field's json tag into its name and
-// comma-separated options.
+// `json:"timestamp,string"`
 func parseTag(tag string) (string, tagOptions) {
+	// Tag格式: timestamp,string
+	// tagOptions的区别
 	if idx := strings.Index(tag, ","); idx != -1 {
 		return tag[:idx], tagOptions(tag[idx+1:])
 	}
 	return tag, tagOptions("")
 }
 
-// Contains reports whether a comma-separated list of options
-// contains a particular substr flag. substr must be surrounded by a
-// string boundary or commas.
+//
+// 判断是否包含某个tag
+//
 func (o tagOptions) Contains(optionName string) bool {
 	if len(o) == 0 {
 		return false

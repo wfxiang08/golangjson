@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/base64"
-	"fmt"
 	"math"
 	"reflect"
 	"runtime"
@@ -158,6 +157,7 @@ import (
 //
 func Marshal(v interface{}) ([]byte, error) {
 	e := &encodeState{}
+	// 如何encode呢?
 	err := e.marshal(v, encOpts{escapeHTML: true})
 	if err != nil {
 		return nil, err
@@ -216,6 +216,7 @@ func HTMLEscape(dst *bytes.Buffer, src []byte) {
 
 // Marshaler is the interface implemented by types that
 // can marshal themselves into valid JSON.
+// 符合JSON Marshaler接口
 type Marshaler interface {
 	MarshalJSON() ([]byte, error)
 }
@@ -266,8 +267,8 @@ var hex = "0123456789abcdef"
 
 // An encodeState encodes JSON into a bytes.Buffer.
 type encodeState struct {
-	bytes.Buffer // accumulated output
-	scratch      [64]byte
+	bytes.Buffer          // accumulated output
+	scratch      [64]byte // 临时使用
 }
 
 var encodeStatePool sync.Pool
@@ -293,14 +294,18 @@ func (e *encodeState) marshal(v interface{}, opts encOpts) (err error) {
 			err = r.(error)
 		}
 	}()
+	// reflect.Value
+	// reflect.Type
 	e.reflectValue(reflect.ValueOf(v), opts)
 	return nil
 }
 
+// 直接报错
 func (e *encodeState) error(err error) {
 	panic(err)
 }
 
+// 如何判断是否为空呢？
 func isEmptyValue(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
@@ -314,13 +319,16 @@ func isEmptyValue(v reflect.Value) bool {
 	case reflect.Float32, reflect.Float64:
 		return v.Float() == 0
 	case reflect.Interface, reflect.Ptr:
+		// Ptr指向的对象非空，也ok
 		return v.IsNil()
 	}
 	return false
 }
 
 func (e *encodeState) reflectValue(v reflect.Value, opts encOpts) {
-	valueEncoder(v)(e, v, opts)
+	// 获取valueEncoder, 然后通过valueEncoder来序列化
+	encoderFunction := valueEncoder(v)
+	encoderFunction(e, v, opts)
 }
 
 type encOpts struct {
@@ -330,20 +338,27 @@ type encOpts struct {
 	escapeHTML bool
 }
 
+// 和 reflect.Type 对应的序列化函数
 type encoderFunc func(e *encodeState, v reflect.Value, opts encOpts)
 
+// 不同的类型的Encoder的cache
 var encoderCache struct {
 	sync.RWMutex
 	m map[reflect.Type]encoderFunc
 }
 
+// 获取Value对应的encode function
 func valueEncoder(v reflect.Value) encoderFunc {
 	if !v.IsValid() {
 		return invalidValueEncoder
 	}
+
 	return typeEncoder(v.Type())
 }
 
+//
+// 对于t 如何进行序列化呢?
+//
 func typeEncoder(t reflect.Type) encoderFunc {
 	encoderCache.RLock()
 	f := encoderCache.m[t]
@@ -360,10 +375,13 @@ func typeEncoder(t reflect.Type) encoderFunc {
 	if encoderCache.m == nil {
 		encoderCache.m = make(map[reflect.Type]encoderFunc)
 	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
+	// 临时的Encoder function
 	encoderCache.m[t] = func(e *encodeState, v reflect.Value, opts encOpts) {
 		wg.Wait()
+		// 记住当前Context下的f(尽快返回）
 		f(e, v, opts)
 	}
 	encoderCache.Unlock()
@@ -373,6 +391,8 @@ func typeEncoder(t reflect.Type) encoderFunc {
 	f = newTypeEncoder(t, true)
 	wg.Done()
 	encoderCache.Lock()
+
+	// 正式的Encoder function，不会再访问: wg
 	encoderCache.m[t] = f
 	encoderCache.Unlock()
 	return f
@@ -386,9 +406,12 @@ var (
 // newTypeEncoder constructs an encoderFunc for a type.
 // The returned encoder only checks CanAddr when allowAddr is true.
 func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
+
+	// Marshaler 接口
 	if t.Implements(marshalerType) {
 		return marshalerEncoder
 	}
+
 	if t.Kind() != reflect.Ptr && allowAddr {
 		if reflect.PtrTo(t).Implements(marshalerType) {
 			return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
@@ -404,6 +427,7 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 		}
 	}
 
+	// 基本类型的Encoder
 	switch t.Kind() {
 	case reflect.Bool:
 		return boolEncoder
@@ -434,30 +458,44 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	}
 }
 
+// 无效的value统一按照 null 处理
 func invalidValueEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	e.WriteString("null")
 }
 
+//
+// 如何序列化v，通过 Marshaler 接口来实现
+//
 func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.Kind() == reflect.Ptr && v.IsNil() {
 		e.WriteString("null")
 		return
 	}
+
+	// 假定v实现了 Marshaler 接口
 	m, ok := v.Interface().(Marshaler)
 	if !ok {
 		e.WriteString("null")
 		return
 	}
+
+	// 调用 MarshalJSON 接口
 	b, err := m.MarshalJSON()
 	if err == nil {
-		// copy JSON into buffer, checking validity.
+		// 正常
+		// 将b添加到e.Buffer中
 		err = compact(&e.Buffer, b, opts.escapeHTML)
 	}
+
+	// 设置Error
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err})
 	}
 }
 
+//
+// 处理: Marshaler 对象
+//
 func addrMarshalerEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	va := v.Addr()
 	if va.IsNil() {
@@ -475,6 +513,9 @@ func addrMarshalerEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	}
 }
 
+//
+// 处理: TextMarshaler 对象
+//
 func textMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.Kind() == reflect.Ptr && v.IsNil() {
 		e.WriteString("null")
@@ -482,18 +523,28 @@ func textMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	}
 	m := v.Interface().(encoding.TextMarshaler)
 	b, err := m.MarshalText()
+
+	// 出错处理
 	if err != nil {
 		e.error(&MarshalerError{v.Type(), err})
 	}
+
+	// 处理文本
 	e.stringBytes(b, opts.escapeHTML)
 }
 
+//
+// textMarshalerEncoder
+// addrTextMarshalerEncoder
+//
 func addrTextMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	// Addr 间接处理
 	va := v.Addr()
 	if va.IsNil() {
 		e.WriteString("null")
 		return
 	}
+
 	m := va.Interface().(encoding.TextMarshaler)
 	b, err := m.MarshalText()
 	if err != nil {
@@ -502,46 +553,33 @@ func addrTextMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	e.stringBytes(b, opts.escapeHTML)
 }
 
+// 如何Encode bool?
 func boolEncoder(e *encodeState, v reflect.Value, opts encOpts) {
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 	if v.Bool() {
 		e.WriteString("true")
 	} else {
 		e.WriteString("false")
 	}
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 }
 
+// 编码int
 func intEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	b := strconv.AppendInt(e.scratch[:0], v.Int(), 10)
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 	e.Write(b)
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 }
 
+// 编码uint
 func uintEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	b := strconv.AppendUint(e.scratch[:0], v.Uint(), 10)
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 	e.Write(b)
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 }
 
 type floatEncoder int // number of bits
 
 func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	f := v.Float()
+
+	// 不支持处理Inf, Nan
 	if math.IsInf(f, 0) || math.IsNaN(f) {
 		e.error(&UnsupportedValueError{v, strconv.FormatFloat(f, 'g', -1, int(bits))})
 	}
@@ -553,6 +591,8 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	// and exponents themselves are not padded to two digits.
 	b := e.scratch[:0]
 	abs := math.Abs(f)
+
+	// 根据动态范围调整具体的float的格式
 	fmt := byte('f')
 	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
 	if abs != 0 {
@@ -570,13 +610,7 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 		}
 	}
 
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 	e.Write(b)
-	if opts.quoted {
-		e.WriteByte('"')
-	}
 }
 
 var (
@@ -585,35 +619,27 @@ var (
 )
 
 func stringEncoder(e *encodeState, v reflect.Value, opts encOpts) {
-	if v.Type() == numberType {
-		numStr := v.String()
-		// In Go1.5 the empty string encodes to "0", while this is not a valid number literal
-		// we keep compatibility so check validity after this.
-		if numStr == "" {
-			numStr = "0" // Number's zero-val
-		}
-		if !isValidNumber(numStr) {
-			e.error(fmt.Errorf("json: invalid number literal %q", numStr))
-		}
-		e.WriteString(numStr)
-		return
-	}
 	if opts.quoted {
+		// 字符串外部再添加引号
+		// "aaa" --> "aaa" ---> "\"aaa\""
 		sb, err := Marshal(v.String())
 		if err != nil {
 			e.error(err)
 		}
+		// 输出结果为: "xxx"
 		e.string(string(sb), opts.escapeHTML)
 	} else {
 		e.string(v.String(), opts.escapeHTML)
 	}
 }
 
+// interface如何序列化呢?
 func interfaceEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.IsNil() {
 		e.WriteString("null")
 		return
 	}
+
 	e.reflectValue(v.Elem(), opts)
 }
 
@@ -621,16 +647,21 @@ func unsupportedTypeEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	e.error(&UnsupportedTypeError{v.Type()})
 }
 
+// struct如何Encoder呢?
 type structEncoder struct {
 	fields    []field
 	fieldEncs []encoderFunc
 }
 
 func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
+	// 首先struct对应一个json object
 	e.WriteByte('{')
+
 	first := true
 	for i, f := range se.fields {
 		fv := fieldByIndex(v, f.index)
+
+		// 无效，或者为空，忽略空值，则跳过
 		if !fv.IsValid() || f.omitEmpty && isEmptyValue(fv) {
 			continue
 		}
@@ -639,8 +670,12 @@ func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 		} else {
 			e.WriteByte(',')
 		}
+
+		// 添加name
 		e.string(f.name, opts.escapeHTML)
 		e.WriteByte(':')
+
+		// 调用第i个field的Encode 函数
 		opts.quoted = f.quoted
 		se.fieldEncs[i](e, fv, opts)
 	}
@@ -649,6 +684,9 @@ func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 
 func newStructEncoder(t reflect.Type) encoderFunc {
 	fields := cachedTypeFields(t)
+	// 结构体:
+	// Fields
+	// 每个Field对应一个Func
 	se := &structEncoder{
 		fields:    fields,
 		fieldEncs: make([]encoderFunc, len(fields)),
@@ -656,6 +694,8 @@ func newStructEncoder(t reflect.Type) encoderFunc {
 	for i, f := range fields {
 		se.fieldEncs[i] = typeEncoder(typeByIndex(t, f.index))
 	}
+
+	// 结构体的方法就直接和它对应的对象关联
 	return se.encode
 }
 
@@ -679,6 +719,8 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 			e.error(&MarshalerError{v.Type(), err})
 		}
 	}
+
+	// sv按照s来排序
 	sort.Slice(sv, func(i, j int) bool { return sv[i].s < sv[j].s })
 
 	for i, kv := range sv {
@@ -687,6 +729,8 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 		}
 		e.string(kv.s, opts.escapeHTML)
 		e.WriteByte(':')
+
+		// 如何编码元素呢? 不同的元素的编码方式不一样
 		me.elemEnc(e, v.MapIndex(kv.v), opts)
 	}
 	e.WriteByte('}')
@@ -829,12 +873,16 @@ func isValidTag(s string) bool {
 	return true
 }
 
+// index:
+// v[index[0]][index[1]][index[2]]...
+//
 func fieldByIndex(v reflect.Value, index []int) reflect.Value {
 	for _, i := range index {
 		if v.Kind() == reflect.Ptr {
 			if v.IsNil() {
 				return reflect.Value{}
 			}
+			// 获取Ptr的对应的Value
 			v = v.Elem()
 		}
 		v = v.Field(i)
@@ -858,15 +906,20 @@ type reflectWithString struct {
 }
 
 func (w *reflectWithString) resolve() error {
+	// 给定v, 获取s?
+	// 如果是字符串
 	if w.v.Kind() == reflect.String {
 		w.s = w.v.String()
 		return nil
 	}
+	// 如果是: TextMarshaler
 	if tm, ok := w.v.Interface().(encoding.TextMarshaler); ok {
 		buf, err := tm.MarshalText()
 		w.s = string(buf)
 		return err
 	}
+
+	// 其他类型的Value
 	switch w.v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		w.s = strconv.FormatInt(w.v.Int(), 10)
@@ -881,7 +934,10 @@ func (w *reflectWithString) resolve() error {
 // NOTE: keep in sync with stringBytes below.
 func (e *encodeState) string(s string, escapeHTML bool) int {
 	len0 := e.Len()
+
+	// 添加string
 	e.WriteByte('"')
+
 	start := 0
 	for i := 0; i < len(s); {
 		if b := s[i]; b < utf8.RuneSelf {
@@ -892,6 +948,8 @@ func (e *encodeState) string(s string, escapeHTML bool) int {
 			if start < i {
 				e.WriteString(s[start:i])
 			}
+
+			// html不安全，转义
 			switch b {
 			case '\\', '"':
 				e.WriteByte('\\')
@@ -919,6 +977,8 @@ func (e *encodeState) string(s string, escapeHTML bool) int {
 			start = i
 			continue
 		}
+
+		// 获取utf8 rune, 然后整体转义
 		c, size := utf8.DecodeRuneInString(s[i:])
 		if c == utf8.RuneError && size == 1 {
 			if start < i {
@@ -956,6 +1016,7 @@ func (e *encodeState) string(s string, escapeHTML bool) int {
 }
 
 // NOTE: keep in sync with string above.
+// 这部分使用场景？ 基本逻辑和上面是一样的
 func (e *encodeState) stringBytes(s []byte, escapeHTML bool) int {
 	len0 := e.Len()
 	e.WriteByte('"')
@@ -1051,6 +1112,8 @@ func fillField(f field) field {
 	return f
 }
 
+
+// 通过index来排序field
 // byIndex sorts field by index sequence.
 type byIndex []field
 
@@ -1058,6 +1121,7 @@ func (x byIndex) Len() int { return len(x) }
 
 func (x byIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
+// x[i].index < x[j].index
 func (x byIndex) Less(i, j int) bool {
 	for k, xik := range x[i].index {
 		if k >= len(x[j].index) {
@@ -1075,8 +1139,11 @@ func (x byIndex) Less(i, j int) bool {
 // and then any reachable anonymous structs.
 func typeFields(t reflect.Type) []field {
 	// Anonymous fields to explore at the current level and the next.
+
 	current := []field{}
 	next := []field{{typ: t}}
+
+	// BFS搜索
 
 	// Count of queued names for current level and the next.
 	count := map[reflect.Type]int{}
@@ -1089,6 +1156,8 @@ func typeFields(t reflect.Type) []field {
 	var fields []field
 
 	for len(next) > 0 {
+		// current <= next
+		// next 则替换为current中的数据，并将数据清空
 		current, next = next, current[:0]
 		count, nextCount = nextCount, map[reflect.Type]int{}
 
@@ -1101,6 +1170,8 @@ func typeFields(t reflect.Type) []field {
 			// Scan f.typ for fields to include.
 			for i := 0; i < f.typ.NumField(); i++ {
 				sf := f.typ.Field(i)
+
+				// 非空，非匿名，跳过
 				if sf.PkgPath != "" && !sf.Anonymous { // unexported
 					continue
 				}
@@ -1112,20 +1183,28 @@ func typeFields(t reflect.Type) []field {
 				if !isValidTag(name) {
 					name = ""
 				}
+
+				// index的意义是什么呢?
 				index := make([]int, len(f.index)+1)
 				copy(index, f.index)
 				index[len(f.index)] = i
 
 				ft := sf.Type
+				// Type名字为空
+				// type xx struct {
+				//    *Student
+				// }
 				if ft.Name() == "" && ft.Kind() == reflect.Ptr {
 					// Follow pointer.
 					ft = ft.Elem()
 				}
 
 				// Only strings, floats, integers, and booleans can be quoted.
+				// 如何兼容不同格式呢?
 				quoted := false
 				if opts.Contains("string") {
 					switch ft.Kind() {
+					// 基本类型可以Quote?
 					case reflect.Bool,
 						reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 						reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
@@ -1144,8 +1223,8 @@ func typeFields(t reflect.Type) []field {
 					fields = append(fields, fillField(field{
 						name:      name,
 						tag:       tagged,
-						index:     index,
-						typ:       ft,
+						index:     index, // 位于顶级Type的位置
+						typ:       ft,    // Field的type
 						omitEmpty: opts.Contains("omitempty"),
 						quoted:    quoted,
 					}))
