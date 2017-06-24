@@ -333,7 +333,8 @@ func (e *encodeState) reflectValue(v reflect.Value, opts encOpts) {
 
 type encOpts struct {
 	// quoted causes primitive fields to be encoded inside JSON strings.
-	quoted bool
+	inQuoted  bool
+	outQuoted bool
 	// escapeHTML causes '<', '>', and '&' to be escaped in JSON strings.
 	escapeHTML bool
 }
@@ -555,23 +556,42 @@ func addrTextMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 
 // 如何Encode bool?
 func boolEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 	if v.Bool() {
 		e.WriteString("true")
 	} else {
 		e.WriteString("false")
 	}
+
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 }
 
 // 编码int
 func intEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 	b := strconv.AppendInt(e.scratch[:0], v.Int(), 10)
 	e.Write(b)
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 }
 
 // 编码uint
 func uintEncoder(e *encodeState, v reflect.Value, opts encOpts) {
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 	b := strconv.AppendUint(e.scratch[:0], v.Uint(), 10)
 	e.Write(b)
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 }
 
 type floatEncoder int // number of bits
@@ -609,8 +629,13 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 			b = b[:n-1]
 		}
 	}
-
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 	e.Write(b)
+	if opts.outQuoted {
+		e.WriteByte('"')
+	}
 }
 
 var (
@@ -619,7 +644,7 @@ var (
 )
 
 func stringEncoder(e *encodeState, v reflect.Value, opts encOpts) {
-	if opts.quoted {
+	if opts.outQuoted {
 		// 字符串外部再添加引号
 		// "aaa" --> "aaa" ---> "\"aaa\""
 		sb, err := Marshal(v.String())
@@ -676,7 +701,8 @@ func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 		e.WriteByte(':')
 
 		// 调用第i个field的Encode 函数
-		opts.quoted = f.quoted
+		opts.inQuoted = f.inQuoted
+		opts.outQuoted = f.outQuoted
 		se.fieldEncs[i](e, fv, opts)
 	}
 	e.WriteByte('}')
@@ -721,7 +747,9 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	}
 
 	// sv按照s来排序
-	sort.Slice(sv, func(i, j int) bool { return sv[i].s < sv[j].s })
+	sort.Slice(sv, func(i, j int) bool {
+		return sv[i].s < sv[j].s
+	})
 
 	for i, kv := range sv {
 		if i > 0 {
@@ -861,9 +889,9 @@ func isValidTag(s string) bool {
 	for _, c := range s {
 		switch {
 		case strings.ContainsRune("!#$%&()*+-./:<=>?@[]^_{|}~ ", c):
-			// Backslash and quote chars are reserved, but
-			// otherwise any punctuation chars are allowed
-			// in a tag name.
+		// Backslash and quote chars are reserved, but
+		// otherwise any punctuation chars are allowed
+		// in a tag name.
 		default:
 			if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 				return false
@@ -1103,7 +1131,8 @@ type field struct {
 	index     []int
 	typ       reflect.Type
 	omitEmpty bool
-	quoted    bool
+	inQuoted  bool // 输入Quoted
+	outQuoted bool // 输出Quoted
 }
 
 func fillField(f field) field {
@@ -1112,14 +1141,17 @@ func fillField(f field) field {
 	return f
 }
 
-
 // 通过index来排序field
 // byIndex sorts field by index sequence.
 type byIndex []field
 
-func (x byIndex) Len() int { return len(x) }
+func (x byIndex) Len() int {
+	return len(x)
+}
 
-func (x byIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
+func (x byIndex) Swap(i, j int) {
+	x[i], x[j] = x[j], x[i]
+}
 
 // x[i].index < x[j].index
 func (x byIndex) Less(i, j int) bool {
@@ -1172,7 +1204,8 @@ func typeFields(t reflect.Type) []field {
 				sf := f.typ.Field(i)
 
 				// 非空，非匿名，跳过
-				if sf.PkgPath != "" && !sf.Anonymous { // unexported
+				if sf.PkgPath != "" && !sf.Anonymous {
+					// unexported
 					continue
 				}
 				tag := sf.Tag.Get("json")
@@ -1214,6 +1247,19 @@ func typeFields(t reflect.Type) []field {
 					}
 				}
 
+				outQuoted := false
+				if opts.Contains("outstring") {
+					switch ft.Kind() {
+					// 基本类型可以Quote?
+					case reflect.Bool,
+						reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+						reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+						reflect.Float32, reflect.Float64,
+						reflect.String:
+						outQuoted = true
+					}
+				}
+
 				// Record found field and index sequence.
 				if name != "" || !sf.Anonymous || ft.Kind() != reflect.Struct {
 					tagged := name != ""
@@ -1226,7 +1272,8 @@ func typeFields(t reflect.Type) []field {
 						index:     index, // 位于顶级Type的位置
 						typ:       ft,    // Field的type
 						omitEmpty: opts.Contains("omitempty"),
-						quoted:    quoted,
+						inQuoted:  quoted,
+						outQuoted: outQuoted,
 					}))
 					if count[f.typ] > 1 {
 						// If there were multiple instances, add a second,
@@ -1282,7 +1329,8 @@ func typeFields(t reflect.Type) []field {
 				break
 			}
 		}
-		if advance == 1 { // Only one field with this name
+		if advance == 1 {
+			// Only one field with this name
 			out = append(out, fi)
 			continue
 		}

@@ -33,7 +33,6 @@ type U struct {
 type V struct {
 	F1 interface{}
 	F2 int32
-	F3 Number
 	F4 *VOuter
 }
 
@@ -51,10 +50,9 @@ var ifaceNumAsFloat64 = map[string]interface{}{
 }
 
 var ifaceNumAsNumber = map[string]interface{}{
-	"k1": Number("1"),
 	"k2": "s",
-	"k3": []interface{}{Number("1"), Number("2.0"), Number("3e-3")},
-	"k4": map[string]interface{}{"kk1": "s", "kk2": Number("2")},
+	"k3": []interface{}{"1", "2.0", "3e-3"},
+	"k4": map[string]interface{}{"kk1": "s", "kk2": "2"},
 }
 
 type tx struct {
@@ -256,8 +254,12 @@ type XYZ struct {
 	Z interface{}
 }
 
-func sliceAddr(x []int) *[]int                 { return &x }
-func mapAddr(x map[string]int) *map[string]int { return &x }
+func sliceAddr(x []int) *[]int {
+	return &x
+}
+func mapAddr(x map[string]int) *map[string]int {
+	return &x
+}
 
 type byteWithMarshalJSON byte
 
@@ -390,10 +392,10 @@ var unmarshalTests = []unmarshalTest{
 	{in: `1`, ptr: new(int), out: 1},
 	{in: `1.2`, ptr: new(float64), out: 1.2},
 	{in: `-5`, ptr: new(int16), out: int16(-5)},
-	{in: `2`, ptr: new(Number), out: Number("2"), useNumber: true},
-	{in: `2`, ptr: new(Number), out: Number("2")},
+	{in: `2`, ptr: new(string), out: "2", useNumber: true},
+	{in: `2`, ptr: new(string), out: "2"},
 	{in: `2`, ptr: new(interface{}), out: float64(2.0)},
-	{in: `2`, ptr: new(interface{}), out: Number("2"), useNumber: true},
+	{in: `2`, ptr: new(interface{}), out: "2", useNumber: true},
 	{in: `"a\u1234"`, ptr: new(string), out: "a\u1234"},
 	{in: `"http:\/\/"`, ptr: new(string), out: "http://"},
 	{in: `"g-clef: \uD834\uDD1E"`, ptr: new(string), out: "g-clef: \U0001D11E"},
@@ -401,8 +403,8 @@ var unmarshalTests = []unmarshalTest{
 	{in: "null", ptr: new(interface{}), out: nil},
 	{in: `{"X": [1,2,3], "Y": 4}`, ptr: new(T), out: T{Y: 4}, err: &UnmarshalTypeError{"array", reflect.TypeOf(""), 7, "T", "X"}},
 	{in: `{"x": 1}`, ptr: new(tx), out: tx{}},
-	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: float64(1), F2: int32(2), F3: Number("3")}},
-	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: Number("1"), F2: int32(2), F3: Number("3")}, useNumber: true},
+	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: float64(1), F2: int32(2)}},
+	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: "1", F2: int32(2)}, useNumber: true},
 	{in: `{"k1":1,"k2":"s","k3":[1,2.0,3e-3],"k4":{"kk1":"s","kk2":2}}`, ptr: new(interface{}), out: ifaceNumAsFloat64},
 	{in: `{"k1":1,"k2":"s","k3":[1,2.0,3e-3],"k4":{"kk1":"s","kk2":2}}`, ptr: new(interface{}), out: ifaceNumAsNumber, useNumber: true},
 
@@ -837,18 +839,6 @@ func TestMarshalBadUTF8(t *testing.T) {
 	}
 }
 
-func TestMarshalNumberZeroVal(t *testing.T) {
-	var n Number
-	out, err := Marshal(n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	outStr := string(out)
-	if outStr != "0" {
-		t.Fatalf("Invalid zero val for Number: %q", outStr)
-	}
-}
-
 func TestMarshalEmbeds(t *testing.T) {
 	top := &Top{
 		Level0: 1,
@@ -984,26 +974,6 @@ var numberTests = []struct {
 	{in: "1e1000", intErr: "strconv.ParseInt: parsing \"1e1000\": invalid syntax", floatErr: "strconv.ParseFloat: parsing \"1e1000\": value out of range"},
 }
 
-// Independent of Decode, basic coverage of the accessors in Number
-func TestNumberAccessors(t *testing.T) {
-	for _, tt := range numberTests {
-		n := Number(tt.in)
-		if s := n.String(); s != tt.in {
-			t.Errorf("Number(%q).String() is %q", tt.in, s)
-		}
-		if i, err := n.Int64(); err == nil && tt.intErr == "" && i != tt.i {
-			t.Errorf("Number(%q).Int64() is %d", tt.in, i)
-		} else if (err == nil && tt.intErr != "") || (err != nil && err.Error() != tt.intErr) {
-			t.Errorf("Number(%q).Int64() wanted error %q but got: %v", tt.in, tt.intErr, err)
-		}
-		if f, err := n.Float64(); err == nil && tt.floatErr == "" && f != tt.f {
-			t.Errorf("Number(%q).Float64() is %g", tt.in, f)
-		} else if (err == nil && tt.floatErr != "") || (err != nil && err.Error() != tt.floatErr) {
-			t.Errorf("Number(%q).Float64() wanted error %q but got: %v", tt.in, tt.floatErr, err)
-		}
-	}
-}
-
 func TestLargeByteSlice(t *testing.T) {
 	s0 := make([]byte, 2000)
 	for i := range s0 {
@@ -1092,7 +1062,8 @@ func TestErrorMessageFromMisusedString(t *testing.T) {
 }
 
 func noSpace(c rune) rune {
-	if isSpace(byte(c)) { //only used for ascii
+	if isSpace(byte(c)) {
+		//only used for ascii
 		return -1
 	}
 	return c
@@ -1906,7 +1877,9 @@ func TestSkipArrayObjects(t *testing.T) {
 // Test semantics of pre-filled struct fields and pre-filled map fields.
 // Issue 4900.
 func TestPrefilled(t *testing.T) {
-	ptrToMap := func(m map[string]interface{}) *map[string]interface{} { return &m }
+	ptrToMap := func(m map[string]interface{}) *map[string]interface{} {
+		return &m
+	}
 
 	// Values here change, cannot reuse table across runs.
 	var prefillTests = []struct {
@@ -1971,6 +1944,7 @@ var invalidUnmarshalTextTests = []struct {
 	{new(net.IP), "json: cannot unmarshal number into Go value of type *net.IP"},
 }
 
+// go test github.com/wfxiang08/golangjson/json -v -run "TestInvalidUnmarshalText"
 func TestInvalidUnmarshalText(t *testing.T) {
 	buf := []byte(`123`)
 	for _, tt := range invalidUnmarshalTextTests {
@@ -1985,26 +1959,41 @@ func TestInvalidUnmarshalText(t *testing.T) {
 	}
 }
 
+type testInvalidStringOption struct {
+	T time.Time         `json:",string"`
+	M map[string]string `json:",string"`
+	S []string          `json:",string"`
+	A [1]string         `json:",string"`
+	I interface{}       `json:",string"`
+	P *int              `json:",string"`
+}
+
+// go test github.com/wfxiang08/golangjson/json -v -run "TestInvalidStringOption"
 // Test that string option is ignored for invalid types.
 // Issue 9812.
 func TestInvalidStringOption(t *testing.T) {
-	num := 0
-	item := struct {
-		T time.Time         `json:",string"`
-		M map[string]string `json:",string"`
-		S []string          `json:",string"`
-		A [1]string         `json:",string"`
-		I interface{}       `json:",string"`
-		P *int              `json:",string"`
-	}{M: make(map[string]string), S: make([]string, 0), I: num, P: &num}
+	num := 100
 
+	item := testInvalidStringOption{M: make(map[string]string),
+		S: make([]string, 0),
+		I: num,
+		P: &num,
+	}
+
+	// 验证: ",string"在哪些对象上面生效， 这里应该只对: P *int 有效
 	data, err := Marshal(item)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
+	} else {
+		fmt.Printf("Marshal succeed: %s\n", string(data))
 	}
 
-	err = Unmarshal(data, &item)
+	var item1 testInvalidStringOption
+	err = Unmarshal(data, &item1)
 	if err != nil {
 		t.Fatalf("Unmarshal: %v", err)
+	} else {
+		data, _ := Marshal(item)
+		fmt.Printf("Unmarshal succeed: %s\n", string(data))
 	}
 }
