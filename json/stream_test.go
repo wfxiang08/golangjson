@@ -216,6 +216,7 @@ func TestRawMessage(t *testing.T) {
 	}
 }
 
+// go test github.com/wfxiang08/golangjson/json -v -run "TestNullRawMessage$"
 func TestNullRawMessage(t *testing.T) {
 	// TODO(rsc): Should not need the * in *RawMessage
 	var data struct {

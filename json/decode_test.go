@@ -1568,6 +1568,7 @@ type NullTestStrings struct {
 
 // JSON null values should be ignored for primitives and string values instead of resulting in an error.
 // Issue 2540
+// go test github.com/wfxiang08/golangjson/json -v -run "TestUnmarshalNulls$"
 func TestUnmarshalNulls(t *testing.T) {
 	// Unmarshal docs:
 	// The JSON null value unmarshals into an interface, map, pointer, or slice
@@ -1850,6 +1851,7 @@ func (t *Time3339) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// go test github.com/wfxiang08/golangjson/json -v -run "TestUnmarshalJSONLiteralError$"
 func TestUnmarshalJSONLiteralError(t *testing.T) {
 	var t3 Time3339
 	err := Unmarshal([]byte(`"0000-00-00T00:00:00Z"`), &t3)
@@ -1864,6 +1866,7 @@ func TestUnmarshalJSONLiteralError(t *testing.T) {
 // Test that extra object elements in an array do not result in a
 // "data changing underfoot" error.
 // Issue 3717
+// go test github.com/wfxiang08/golangjson/json -v -run "TestSkipArrayObjects$"
 func TestSkipArrayObjects(t *testing.T) {
 	json := `[{}]`
 	var dest [0]interface{}
@@ -1876,6 +1879,7 @@ func TestSkipArrayObjects(t *testing.T) {
 
 // Test semantics of pre-filled struct fields and pre-filled map fields.
 // Issue 4900.
+// go test github.com/wfxiang08/golangjson/json -v -run "TestPrefilled$"
 func TestPrefilled(t *testing.T) {
 	ptrToMap := func(m map[string]interface{}) *map[string]interface{} {
 		return &m
@@ -1919,7 +1923,7 @@ var invalidUnmarshalTests = []struct {
 	{struct{}{}, "json: Unmarshal(non-pointer struct {})"},
 	{(*int)(nil), "json: Unmarshal(nil *int)"},
 }
-
+// go test github.com/wfxiang08/golangjson/json -v -run "TestInvalidUnmarshal$"
 func TestInvalidUnmarshal(t *testing.T) {
 	buf := []byte(`{"a":"1"}`)
 	for _, tt := range invalidUnmarshalTests {
