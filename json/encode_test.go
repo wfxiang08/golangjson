@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"testing"
 	"unicode"
+	gjson "encoding/json"
 )
 
 type Optionals struct {
@@ -140,7 +141,7 @@ var unsupportedValues = []interface{}{
 func TestUnsupportedValues(t *testing.T) {
 	for _, v := range unsupportedValues {
 		if _, err := Marshal(v); err != nil {
-			if _, ok := err.(*UnsupportedValueError); !ok {
+			if _, ok := err.(*gjson.UnsupportedValueError); !ok {
 				t.Errorf("for %v, got %T want UnsupportedValueError", v, err)
 			}
 		} else {
@@ -317,8 +318,8 @@ func TestNilMarshal(t *testing.T) {
 		{v: map[string]string(nil), want: `null`},
 		{v: []byte(nil), want: `null`},
 		{v: struct{ M string }{"gopher"}, want: `{"M":"gopher"}`},
-		{v: struct{ M Marshaler }{}, want: `{"M":null}`},
-		{v: struct{ M Marshaler }{(*nilMarshaler)(nil)}, want: `{"M":"0zenil0"}`},
+		{v: struct{ M gjson.Marshaler }{}, want: `{"M":null}`},
+		{v: struct{ M gjson.Marshaler }{(*nilMarshaler)(nil)}, want: `{"M":"0zenil0"}`},
 		{v: struct{ M interface{} }{(*nilMarshaler)(nil)}, want: `{"M":null}`},
 	}
 

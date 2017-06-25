@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/base64"
+	gjson "encoding/json"
 	"math"
 	"reflect"
 	"runtime"
@@ -214,55 +215,6 @@ func HTMLEscape(dst *bytes.Buffer, src []byte) {
 	}
 }
 
-// Marshaler is the interface implemented by types that
-// can marshal themselves into valid JSON.
-// 符合JSON Marshaler接口
-type Marshaler interface {
-	MarshalJSON() ([]byte, error)
-}
-
-// An UnsupportedTypeError is returned by Marshal when attempting
-// to encode an unsupported value type.
-type UnsupportedTypeError struct {
-	Type reflect.Type
-}
-
-func (e *UnsupportedTypeError) Error() string {
-	return "json: unsupported type: " + e.Type.String()
-}
-
-type UnsupportedValueError struct {
-	Value reflect.Value
-	Str   string
-}
-
-func (e *UnsupportedValueError) Error() string {
-	return "json: unsupported value: " + e.Str
-}
-
-// Before Go 1.2, an InvalidUTF8Error was returned by Marshal when
-// attempting to encode a string value with invalid UTF-8 sequences.
-// As of Go 1.2, Marshal instead coerces the string to valid UTF-8 by
-// replacing invalid bytes with the Unicode replacement rune U+FFFD.
-// This error is no longer generated but is kept for backwards compatibility
-// with programs that might mention it.
-type InvalidUTF8Error struct {
-	S string // the whole string value that caused the error
-}
-
-func (e *InvalidUTF8Error) Error() string {
-	return "json: invalid UTF-8 in string: " + strconv.Quote(e.S)
-}
-
-type MarshalerError struct {
-	Type reflect.Type
-	Err  error
-}
-
-func (e *MarshalerError) Error() string {
-	return "json: error calling MarshalJSON for type " + e.Type.String() + ": " + e.Err.Error()
-}
-
 var hex = "0123456789abcdef"
 
 // An encodeState encodes JSON into a bytes.Buffer.
@@ -400,7 +352,7 @@ func typeEncoder(t reflect.Type) encoderFunc {
 }
 
 var (
-	marshalerType     = reflect.TypeOf(new(Marshaler)).Elem()
+	marshalerType     = reflect.TypeOf(new(gjson.Marshaler)).Elem()
 	textMarshalerType = reflect.TypeOf(new(encoding.TextMarshaler)).Elem()
 )
 
@@ -474,7 +426,7 @@ func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	}
 
 	// 假定v实现了 Marshaler 接口
-	m, ok := v.Interface().(Marshaler)
+	m, ok := v.Interface().(gjson.Marshaler)
 	if !ok {
 		e.WriteString("null")
 		return
@@ -490,7 +442,7 @@ func marshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 
 	// 设置Error
 	if err != nil {
-		e.error(&MarshalerError{v.Type(), err})
+		e.error(&gjson.MarshalerError{v.Type(), err})
 	}
 }
 
@@ -503,14 +455,14 @@ func addrMarshalerEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 		e.WriteString("null")
 		return
 	}
-	m := va.Interface().(Marshaler)
+	m := va.Interface().(gjson.Marshaler)
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
 		err = compact(&e.Buffer, b, true)
 	}
 	if err != nil {
-		e.error(&MarshalerError{v.Type(), err})
+		e.error(&gjson.MarshalerError{v.Type(), err})
 	}
 }
 
@@ -527,7 +479,7 @@ func textMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 
 	// 出错处理
 	if err != nil {
-		e.error(&MarshalerError{v.Type(), err})
+		e.error(&gjson.MarshalerError{v.Type(), err})
 	}
 
 	// 处理文本
@@ -549,7 +501,7 @@ func addrTextMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	m := va.Interface().(encoding.TextMarshaler)
 	b, err := m.MarshalText()
 	if err != nil {
-		e.error(&MarshalerError{v.Type(), err})
+		e.error(&gjson.MarshalerError{v.Type(), err})
 	}
 	e.stringBytes(b, opts.escapeHTML)
 }
@@ -601,7 +553,7 @@ func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 
 	// 不支持处理Inf, Nan
 	if math.IsInf(f, 0) || math.IsNaN(f) {
-		e.error(&UnsupportedValueError{v, strconv.FormatFloat(f, 'g', -1, int(bits))})
+		e.error(&gjson.UnsupportedValueError{v, strconv.FormatFloat(f, 'g', -1, int(bits))})
 	}
 
 	// Convert as if by ES6 number to string conversion.
@@ -669,7 +621,7 @@ func interfaceEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 }
 
 func unsupportedTypeEncoder(e *encodeState, v reflect.Value, _ encOpts) {
-	e.error(&UnsupportedTypeError{v.Type()})
+	e.error(&gjson.UnsupportedTypeError{v.Type()})
 }
 
 // struct如何Encoder呢?
@@ -742,7 +694,7 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	for i, v := range keys {
 		sv[i].v = v
 		if err := sv[i].resolve(); err != nil {
-			e.error(&MarshalerError{v.Type(), err})
+			e.error(&gjson.MarshalerError{v.Type(), err})
 		}
 	}
 
