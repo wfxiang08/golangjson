@@ -223,16 +223,16 @@ func isValidNumber(s string) bool {
 // decodeState represents the state while decoding a JSON value.
 type decodeState struct {
 	data         []byte
-	off          int     // read offset in data
+	off          int // read offset in data
 	scan         scanner
 	nextscan     scanner // for calls to nextValue
 	errorContext struct {
-		             // provides context for type errors
-		             Struct string
-		             Field  string
-	             }
-	savedError   error
-	useNumber    bool
+		// provides context for type errors
+		Struct string
+		Field  string
+	}
+	savedError error
+	useNumber  bool
 }
 
 // errPhase is used for errors that should not happen unless
@@ -348,7 +348,7 @@ func (d *decodeState) value(v reflect.Value) {
 		d.scan.step(&d.scan, '"')
 
 		n := len(d.scan.parseState)
-		if n > 0 && d.scan.parseState[n - 1] == parseObjectKey {
+		if n > 0 && d.scan.parseState[n-1] == parseObjectKey {
 			// d.scan thinks we just read an object key; finish the object
 			d.scan.step(&d.scan, ':')
 			d.scan.step(&d.scan, '"')
@@ -399,10 +399,10 @@ func (d *decodeState) valueQuoted() interface{} {
 
 	case scanBeginLiteral:
 		return d.literalInterface()
-	//switch v := d.literalInterface().(type) {
-	//case nil, string:
-	//	return v
-	//}
+		//switch v := d.literalInterface().(type) {
+		//case nil, string:
+		//	return v
+		//}
 	}
 	return unquotedValue{}
 }
@@ -525,7 +525,7 @@ func (d *decodeState) array(v reflect.Value) {
 		if v.Kind() == reflect.Slice {
 			// Grow slice if necessary
 			if i >= v.Cap() {
-				newcap := v.Cap() + v.Cap() / 2
+				newcap := v.Cap() + v.Cap()/2
 				if newcap < 4 {
 					newcap = 4
 				}
@@ -676,7 +676,7 @@ func (d *decodeState) object(v reflect.Value) {
 		// JSON标准中的Key都是字符串
 		start := d.off - 1
 		op = d.scanWhile(scanContinue)
-		item := d.data[start : d.off - 1]
+		item := d.data[start : d.off-1]
 		// 读取有效的Key(类型暂定为字符串）
 		key, ok := unquoteBytes(item)
 		if !ok {
@@ -832,10 +832,10 @@ func (d *decodeState) parseQuotedValue(subv reflect.Value) {
 			subv.SetFloat(qv)
 			return
 		}
-	//
-	// 其他类型
-	// floats, integers, and booleans
-	// 也做简单的兼容
+		//
+		// 其他类型
+		// floats, integers, and booleans
+		// 也做简单的兼容
 	}
 	d.saveError(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v", subv.Type()))
 }
@@ -968,7 +968,7 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 		switch v.Kind() {
 		case reflect.Interface, reflect.Ptr, reflect.Map, reflect.Slice:
 			v.Set(reflect.Zero(v.Type()))
-		// otherwise, ignore null for primitives/string
+			// otherwise, ignore null for primitives/string
 		}
 	case 't', 'f': // true, false
 		value := item[0] == 't'
@@ -1014,7 +1014,7 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 		// 字符串 s --> v.Kind()
 		switch v.Kind() {
 		default:
-			d.parseIntValue(item, &v, fromQuoted)
+			d.parseNumberValue(item, &v, fromQuoted)
 		// d.saveError(&UnmarshalTypeError{Value: "string", Type: v.Type(), Offset: int64(d.off)})
 		case reflect.Slice:
 			// 目标是: []byte
@@ -1047,13 +1047,18 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 	default: // number
 		// "key": 1234
 		// 解析1234
-		d.parseIntValue(item, &v, fromQuoted)
+		d.parseNumberValue(item, &v, fromQuoted)
 	}
 }
 
-func (d *decodeState) parseIntValue(item []byte, v *reflect.Value, fromQuoted bool) {
-	log.Printf("parseIntValue, item: [%s]", string(item))
-	if len(item) > 2 && item[0] == '"' && item[len(item) - 1] == '"' {
+//
+// 给定 item, 将它解析成为number类型的数据格式，其中item可能为 1221, "1212" 之类的格式，但一定期待是number类型的; 否则报错, 或者panic
+//
+func (d *decodeState) parseNumberValue(item []byte, v *reflect.Value, fromQuoted bool) {
+	// log.Printf("parseNumberValue, item: [%s]", string(item))
+
+	// 兼容字符串格式的数字
+	if len(item) > 2 && item[0] == '"' && item[len(item)-1] == '"' {
 		item = item[1:(len(item) - 1)]
 	}
 
@@ -1065,16 +1070,17 @@ func (d *decodeState) parseIntValue(item []byte, v *reflect.Value, fromQuoted bo
 			d.error(errPhase)
 		}
 	}
+
 	s := string(item)
 	switch v.Kind() {
 	default:
-		// log.Printf("parseIntValue, default item: %s", string(item))
 		if fromQuoted {
 			d.error(fmt.Errorf("json: invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type()))
 		} else {
 			d.error(&gjson.UnmarshalTypeError{Value: "number", Type: v.Type(), Offset: int64(d.off)})
 		}
 	case reflect.Interface:
+		// 如果v没有格式限制
 		n, err := d.convertNumber(s)
 		if err != nil {
 			d.saveError(err)
@@ -1087,11 +1093,16 @@ func (d *decodeState) parseIntValue(item []byte, v *reflect.Value, fromQuoted bo
 		v.Set(reflect.ValueOf(n))
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		// 解析数据: int64
 		n, err := strconv.ParseInt(s, 10, 64)
+
+		// 判断是否出错，是否溢出
 		if err != nil || v.OverflowInt(n) {
 			d.saveError(&gjson.UnmarshalTypeError{Value: "number " + s, Type: v.Type(), Offset: int64(d.off)})
 			break
 		}
+
+		// 不区分格式setInt
 		v.SetInt(n)
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
@@ -1110,7 +1121,6 @@ func (d *decodeState) parseIntValue(item []byte, v *reflect.Value, fromQuoted bo
 		}
 		v.SetFloat(n)
 	}
-	// log.Printf("parseIntValue, succeed %s", string(item))
 }
 
 // The xxxInterface routines build up a value to be stored
@@ -1192,7 +1202,7 @@ func (d *decodeState) objectInterface() map[string]interface{} {
 		// Read string key.
 		start := d.off - 1
 		op = d.scanWhile(scanContinue)
-		item := d.data[start : d.off - 1]
+		item := d.data[start : d.off-1]
 		key, ok := unquote(item)
 		if !ok {
 			d.error(errPhase)
@@ -1295,11 +1305,11 @@ func unquote(s []byte) (t string, ok bool) {
 //
 func unquoteBytes(s []byte) (t []byte, ok bool) {
 	// 无效的数据，返回 nil, false
-	if len(s) < 2 || s[0] != '"' || s[len(s) - 1] != '"' {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
 		return
 	}
 	// 去掉收尾"
-	s = s[1 : len(s) - 1]
+	s = s[1 : len(s)-1]
 
 	// Check for unusual characters. If there are none,
 	// then no unquoting is needed, so return a slice of the
@@ -1328,14 +1338,14 @@ func unquoteBytes(s []byte) (t []byte, ok bool) {
 	}
 
 	// 处理特殊字符
-	b := make([]byte, len(s) + 2 * utf8.UTFMax)
+	b := make([]byte, len(s)+2*utf8.UTFMax)
 	w := copy(b, s[0:r])
 	for r < len(s) {
 		// Out of room?  Can only happen if s is full of
 		// malformed UTF-8 and we're replacing each
 		// byte with RuneError.
-		if w >= len(b) - 2 * utf8.UTFMax {
-			nb := make([]byte, (len(b) + utf8.UTFMax) * 2)
+		if w >= len(b)-2*utf8.UTFMax {
+			nb := make([]byte, (len(b)+utf8.UTFMax)*2)
 			copy(nb, b[0:w])
 			b = nb
 		}
